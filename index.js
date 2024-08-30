@@ -3,8 +3,7 @@ const fsSync = require("fs");
 const path = require("path");
 const readline = require("readline");
 
-const backupDir =
-  "C:\\Users\\insxn\\OneDrive\\Documentos\\Bots\\fs-backup\\Backup";
+const backupDir = "D:\\Bots\\Backups from Backup Bot";
 const configFile = "config.json";
 
 let isBackupManagerActive = false;
@@ -20,39 +19,48 @@ async function initializeConfig() {
   }
 }
 
-async function backupFile(sourceDir, filename) {
-  const sourcePath = path.join(sourceDir, filename);
-  const backupPath = path.join(
-    backupDir,
-    `${path.basename(sourceDir)}_${filename}`,
-  );
+async function backupItem(sourcePath, backupBasePath, sourceRootDir) {
+  const relativePath = path.relative(sourceRootDir, sourcePath);
+  const backupPath = path.join(backupBasePath, relativePath);
+
   try {
-    await fs.access(sourcePath, fs.constants.F_OK);
-    await fs.copyFile(sourcePath, backupPath);
-    console.log(`Backed up file: ${filename} from ${sourceDir}`);
-  } catch {
-    console.log(
-      `File ${filename} in ${sourceDir} no longer exists or couldn't be backed up.`,
-    );
+    const stats = await fs.stat(sourcePath);
+    if (stats.isDirectory()) {
+      await fs.mkdir(backupPath, { recursive: true });
+      const items = await fs.readdir(sourcePath);
+      for (const item of items) {
+        await backupItem(
+          path.join(sourcePath, item),
+          backupBasePath,
+          sourceRootDir,
+        );
+      }
+      console.log(`Backed up directory: ${relativePath}`);
+    } else {
+      await fs.mkdir(path.dirname(backupPath), { recursive: true });
+      await fs.copyFile(sourcePath, backupPath);
+      console.log(`Backed up file: ${relativePath}`);
+    }
+  } catch (error) {
+    console.log(`Error backing up ${relativePath}: ${error.message}`);
   }
 }
 
-async function backupAllFiles(sourceDir) {
-  try {
-    const files = await fs.readdir(sourceDir);
-    await Promise.all(files.map((file) => backupFile(sourceDir, file)));
-  } catch (error) {
-    console.log(`Error backing up files in ${sourceDir}: ${error.message}`);
-  }
+async function backupAllItems(sourceDir) {
+  const backupBasePath = path.join(backupDir, path.basename(sourceDir));
+  await fs.mkdir(backupBasePath, { recursive: true });
+  await backupItem(sourceDir, backupBasePath, sourceDir);
 }
 
 function watchDirectory(sourceDir) {
-  backupAllFiles(sourceDir);
-  fsSync.watch(
-    sourceDir,
-    { persistent: true },
-    (_, filename) => filename && backupFile(sourceDir, filename),
-  );
+  backupAllItems(sourceDir);
+  fsSync.watch(sourceDir, { recursive: true }, (eventType, filename) => {
+    if (filename) {
+      const fullPath = path.join(sourceDir, filename);
+      const backupBasePath = path.join(backupDir, path.basename(sourceDir));
+      backupItem(fullPath, backupBasePath, sourceDir);
+    }
+  });
   console.log(`Monitoring directory: ${sourceDir}`);
 }
 
